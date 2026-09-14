@@ -1,0 +1,71 @@
+# chromalint
+
+A linter for colour literals in CSS (and anything else that embeds CSS-style
+colours: templates, Sass, JS-in-CSS). It checks hex codes and the `rgb()` /
+`rgba()` / `hsl()` / `hsla()` functions for the kind of mistake that's easy to
+type by hand and easy to miss in review, because the file still parses fine
+and the browser just clamps or ignores the bad value:
+
+- hex codes with the wrong number of digits (`#12345` isn't 3, 4, 6, or 8)
+- `rgb()` calls that mix percentages and numbers across channels, e.g.
+  `rgb(50%, 100, 20)` — the spec requires one or the other, not both
+- channel or alpha values outside their legal range, e.g. `rgb(300, 0, 0)`
+  or `rgba(0, 0, 0, 150%)`
+- `hsl()` saturation or lightness written without a `%`, e.g.
+  `hsl(120, 50, 50)` — those two channels are always percentages, only the
+  hue is a bare number (or an angle with `deg`/`grad`/`rad`/`turn`)
+
+It does not flag a hue outside 0-360, because CSS defines that as wrapping,
+not an error. That's the kind of distinction a plain regex-for-any-hex-string
+check gets wrong, which is the reason this exists instead of a one-line grep.
+
+## Usage
+
+As a script, given a stylesheet:
+
+```css
+/* style.css */
+a {
+  color: #abcde;
+  background: rgb(50%, 100, 20);
+  border-color: hsl(200, 50, 40%);
+}
+```
+
+```
+$ python -m chromalint.cli style.css
+style.css:3:10: #abcde has 5 hex digits; valid lengths are 3, 4, 6, or 8 [hex-length]
+style.css:4:15: rgb() mixes percentages and numbers: 50%, 100, 20 [rgb-mixed-units]
+style.css:5:17: hsl() saturation must be a percentage, got '50' [hsl-percent-required]
+```
+
+The exit code is 1 if any findings were reported, 2 on a usage or I/O error,
+0 otherwise, which is enough to wire into a pre-commit hook or CI step.
+
+As a library:
+
+```python
+from chromalint import lint_text
+
+findings = lint_text(open("style.css").read())
+for f in findings:
+    print(f)  # "3:10: #abcde has 5 hex digits ... [hex-length]"
+```
+
+## How it works, and where that falls short
+
+`chromalint` scans text line by line with regular expressions; it does not
+parse CSS. That keeps it dependency-free and usable on anything that embeds
+colour literals, but it means it can't tell a real colour from one sitting
+inside a comment or a string, and a colour function spanning multiple lines
+won't be seen at all. Tokens it can't make sense of — Sass variables, custom
+properties, `calc()` — are left alone rather than guessed at.
+
+## Status
+
+Early. `lab()`, `lch()`, `oklab()`, and `oklch()` aren't checked yet; see the
+tests for the exact set of cases currently covered.
+
+## License
+
+MIT, see [LICENSE](LICENSE).
