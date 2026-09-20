@@ -2,9 +2,10 @@
 
 A linter for colour literals in CSS (and anything else that embeds CSS-style
 colours: templates, Sass, JS-in-CSS). It checks hex codes and the `rgb()` /
-`rgba()` / `hsl()` / `hsla()` functions for the kind of mistake that's easy to
-type by hand and easy to miss in review, because the file still parses fine
-and the browser just clamps or ignores the bad value:
+`rgba()` / `hsl()` / `hsla()` / `lab()` / `lch()` / `oklab()` / `oklch()`
+functions for the kind of mistake that's easy to type by hand and easy to
+miss in review, because the file still parses fine and the browser just
+clamps or ignores the bad value:
 
 - hex codes with the wrong number of digits (`#12345` isn't 3, 4, 6, or 8)
 - `rgb()` calls that mix percentages and numbers across channels, e.g.
@@ -14,6 +15,11 @@ and the browser just clamps or ignores the bad value:
 - `hsl()` saturation or lightness written without a `%`, e.g.
   `hsl(120, 50, 50)` — those two channels are always percentages, only the
   hue is a bare number (or an angle with `deg`/`grad`/`rad`/`turn`)
+- `lab()` / `lch()` lightness outside its legal range, e.g. `lab(150 40 60)`
+  — a plain number tops out at 100, or at 1 for `oklab()`/`oklch()`, and a
+  percentage always means 0%-100% regardless of which function it's in
+- `lch()` / `oklch()` chroma written as a negative number, e.g.
+  `lch(50% -40 200)` — chroma has no sign, unlike the hue that follows it
 
 It does not flag a hue outside 0-360, because CSS defines that as wrapping,
 not an error. That's the kind of distinction a plain regex-for-any-hex-string
@@ -63,8 +69,11 @@ properties, `calc()` — are left alone rather than guessed at.
 
 ## Status
 
-Early. `lab()`, `lch()`, `oklab()`, and `oklch()` aren't checked yet; see the
-tests for the exact set of cases currently covered.
+Early. `lab()`/`lch()`/`oklab()`/`oklch()` are checked for lightness range
+and (for `lch()`/`oklch()`) negative chroma, but not the `a`/`b` axes in
+`lab()`/`oklab()` — CSS Color 4 doesn't define a hard range for those, so
+there's nothing obviously wrong to flag. See the tests for the exact set of
+cases currently covered.
 
 ## License
 

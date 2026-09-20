@@ -1,4 +1,5 @@
-"""Regex-based checks for colour literals: hex codes, rgb()/rgba(), hsl()/hsla().
+"""Regex-based checks for colour literals: hex codes, rgb()/rgba(), hsl()/hsla(),
+lab()/lch()/oklab()/oklch().
 
 This is a line scanner, not a CSS parser. It finds things that look like
 colour literals wherever they appear in a line and validates them against the
@@ -13,7 +14,9 @@ from dataclasses import dataclass
 import re
 
 HEX_RE = re.compile(r"#([0-9a-fA-F]+)\b")
-FUNC_RE = re.compile(r"\b(rgba?|hsla?)\(\s*([^)]*?)\s*\)", re.IGNORECASE)
+FUNC_RE = re.compile(
+    r"\b(rgba?|hsla?|(?:ok)?lab|(?:ok)?lch)\(\s*([^)]*?)\s*\)", re.IGNORECASE
+)
 
 VALID_HEX_LENGTHS = {3, 4, 6, 8}
 
@@ -66,8 +69,12 @@ def _check_functional(line: str, lineno: int) -> list[Finding]:
         col = m.start() + 1
         if func.startswith("rgb"):
             findings.extend(_check_rgb(func, args, lineno, col))
-        else:
+        elif func.startswith("hsl"):
             findings.extend(_check_hsl(func, args, lineno, col))
+        elif func.endswith("lab"):
+            findings.extend(_check_lab(func, args, lineno, col))
+        else:
+            findings.extend(_check_lch(func, args, lineno, col))
     return findings
 
 
@@ -170,6 +177,80 @@ def _check_hsl(func: str, args: str, lineno: int, col: int) -> list[Finding]:
                 lineno, col, "hsl-range",
                 f"{func}() {label} {token} is outside 0%-100%",
             ))
+
+    if alpha is not None:
+        findings.extend(_check_alpha(func, alpha, lineno, col))
+
+    return findings
+
+
+def _lightness_finding(func: str, token: str, lineno: int, col: int) -> Finding | None:
+    # lab()/lch() lightness is 0-100 either way; ok*() numbers are 0-1 instead,
+    # but a percentage always means 0%-100% regardless of function.
+    kind, value = _classify(token)
+    if kind is None:
+        return None
+    limit = 100 if kind == "percent" else (1 if func.startswith("ok") else 100)
+    if 0 <= value <= limit:
+        return None
+    unit = "%" if kind == "percent" else ""
+    return Finding(
+        lineno, col, "lab-lightness-range",
+        f"{func}() lightness {token} is outside 0-{limit}{unit}",
+    )
+
+
+def _check_lab(func: str, args: str, lineno: int, col: int) -> list[Finding]:
+    main, alpha = _split_alpha(args)
+    parts = _split_parts(main)
+
+    if len(parts) != 3:
+        return [Finding(
+            lineno, col, "arg-count",
+            f"{func}() takes 3 channel values plus optional alpha, got {len(parts)}",
+        )]
+
+    lightness, _a, _b = parts
+    findings = []
+
+    finding = _lightness_finding(func, lightness, lineno, col)
+    if finding is not None:
+        findings.append(finding)
+
+    if alpha is not None:
+        findings.extend(_check_alpha(func, alpha, lineno, col))
+
+    return findings
+
+
+def _check_lch(func: str, args: str, lineno: int, col: int) -> list[Finding]:
+    main, alpha = _split_alpha(args)
+    parts = _split_parts(main)
+
+    if len(parts) != 3:
+        return [Finding(
+            lineno, col, "arg-count",
+            f"{func}() takes 3 channel values plus optional alpha, got {len(parts)}",
+        )]
+
+    lightness, chroma, hue = parts
+
+    # Hue wraps like it does in hsl(), so only its shape is checked, not its range.
+    if not ANGLE_RE.match(hue):
+        return []  # not a literal we can parse
+
+    findings = []
+
+    finding = _lightness_finding(func, lightness, lineno, col)
+    if finding is not None:
+        findings.append(finding)
+
+    kind, value = _classify(chroma)
+    if kind is not None and value < 0:
+        findings.append(Finding(
+            lineno, col, "lch-chroma-negative",
+            f"{func}() chroma {chroma} cannot be negative",
+        ))
 
     if alpha is not None:
         findings.extend(_check_alpha(func, alpha, lineno, col))
