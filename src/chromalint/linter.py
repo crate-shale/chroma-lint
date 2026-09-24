@@ -7,7 +7,9 @@ CSS Color spec rules that are easy to get wrong by hand: mixing percentages
 and numbers in the same rgb(), forgetting the "%" on hsl() saturation and
 lightness, channel or alpha values outside their legal range, and hex codes
 with the wrong number of digits. Tokens it cannot make sense of (custom
-properties, Sass variables, etc.) are left alone rather than flagged.
+properties, Sass variables, etc.) are left alone rather than flagged. Matches
+inside /* */ comments and quoted strings are also left alone, since those
+aren't colours a browser will ever render.
 """
 
 from dataclasses import dataclass
@@ -38,15 +40,63 @@ class Finding:
 
 def lint_text(text: str) -> list[Finding]:
     findings: list[Finding] = []
+    in_comment = False
     for lineno, line in enumerate(text.splitlines(), start=1):
-        findings.extend(_check_hex(line, lineno))
-        findings.extend(_check_functional(line, lineno))
+        masked, in_comment = _mask_comments_and_strings(line, in_comment)
+        findings.extend(_check_hex(masked, lineno))
+        findings.extend(_check_functional(masked, lineno))
     return findings
 
 
 def lint_file(path: str) -> list[Finding]:
     with open(path, encoding="utf-8") as f:
         return lint_text(f.read())
+
+
+def _mask_comments_and_strings(line: str, in_comment: bool) -> tuple[str, bool]:
+    # Blank out comment and string contents with spaces rather than deleting
+    # them, so every match's column still lines up with the original line.
+    # /* */ comments can span lines, so `in_comment` carries over between
+    # calls; quoted strings are assumed to close on the line they open, which
+    # covers real CSS (a raw newline inside a string is invalid there).
+    chars = list(line)
+    i = 0
+    n = len(line)
+    while i < n:
+        if in_comment:
+            end = line.find("*/", i)
+            stop = n if end == -1 else end + 2
+            for j in range(i, stop):
+                chars[j] = " "
+            in_comment = end == -1
+            i = stop
+            continue
+
+        ch = line[i]
+        if ch == "/" and i + 1 < n and line[i + 1] == "*":
+            in_comment = True
+            chars[i] = chars[i + 1] = " "
+            i += 2
+            continue
+
+        if ch in ("'", '"'):
+            j = i + 1
+            while j < n:
+                if line[j] == "\\" and j + 1 < n:
+                    j += 2
+                    continue
+                if line[j] == ch:
+                    j += 1
+                    break
+                j += 1
+            for k in range(i, j):
+                chars[k] = " "
+            i = j
+            continue
+
+        i += 1
+
+    return "".join(chars), in_comment
 
 
 def _check_hex(line: str, lineno: int) -> list[Finding]:

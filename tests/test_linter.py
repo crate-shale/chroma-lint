@@ -61,6 +61,22 @@ CASES = [
     ("oklch lightness is 0-1, not 0-100",
      "color: oklch(1.5 0.2 200);", ["lab-lightness-range"]),
     ("lch wrong argument count", "color: lch(50% 40);", ["arg-count"]),
+    ("hex inside a block comment is ignored",
+     "/* color: #abcde; */", []),
+    ("rgb call inside a block comment is ignored",
+     "/* background: rgb(300, 0, 0); */", []),
+    ("hex inside a single-quoted string is ignored",
+     "content: '#abcde';", []),
+    ("hex inside a double-quoted string is ignored",
+     'content: "#abcde";', []),
+    ("a real finding after a closed string on the same line is still caught",
+     "content: 'fine'; color: #abcde;", ["hex-length"]),
+    ("an escaped quote inside a string doesn't end it early",
+     "content: 'it\\'s #abcde fine'; color: #abcde;", ["hex-length"]),
+    ("a multi-line block comment masks every line it covers",
+     "/* start\ncolor: #abcde;\nend */", []),
+    ("content after a multi-line comment closes is still checked",
+     "/* start\nend */ color: #abcde;", ["hex-length"]),
 ]
 
 

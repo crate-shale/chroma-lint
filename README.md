@@ -62,10 +62,11 @@ for f in findings:
 
 `chromalint` scans text line by line with regular expressions; it does not
 parse CSS. That keeps it dependency-free and usable on anything that embeds
-colour literals, but it means it can't tell a real colour from one sitting
-inside a comment or a string, and a colour function spanning multiple lines
-won't be seen at all. Tokens it can't make sense of — Sass variables, custom
-properties, `calc()` — are left alone rather than guessed at.
+colour literals. It skips matches inside `/* */` comments (including ones
+spanning several lines) and inside `'...'`/`"..."` strings, but a colour
+function whose own arguments are split across multiple lines won't be seen at
+all. Tokens it can't make sense of — Sass variables, custom properties,
+`calc()` — are left alone rather than guessed at.
 
 ## Status
 
