@@ -63,10 +63,13 @@ for f in findings:
 `chromalint` scans text line by line with regular expressions; it does not
 parse CSS. That keeps it dependency-free and usable on anything that embeds
 colour literals. It skips matches inside `/* */` comments (including ones
-spanning several lines) and inside `'...'`/`"..."` strings, but a colour
-function whose own arguments are split across multiple lines won't be seen at
-all. Tokens it can't make sense of — Sass variables, custom properties,
-`calc()` — are left alone rather than guessed at.
+spanning several lines) and inside `'...'`/`"..."` strings. A colour
+function whose arguments are split across multiple lines is still checked —
+`rgb(50%,\n  100, 20)` is reported at the line and column where `rgb(`
+starts — but if the closing `)` is never found before the end of the file,
+the call is silently skipped rather than guessed at. Tokens it can't make
+sense of — Sass variables, custom properties, `calc()` — are left alone
+rather than guessed at.
 
 ## Status
 

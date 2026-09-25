@@ -16,9 +16,7 @@ from dataclasses import dataclass
 import re
 
 HEX_RE = re.compile(r"#([0-9a-fA-F]+)\b")
-FUNC_RE = re.compile(
-    r"\b(rgba?|hsla?|(?:ok)?lab|(?:ok)?lch)\(\s*([^)]*?)\s*\)", re.IGNORECASE
-)
+FUNC_START_RE = re.compile(r"\b(rgba?|hsla?|(?:ok)?lab|(?:ok)?lch)\(", re.IGNORECASE)
 
 VALID_HEX_LENGTHS = {3, 4, 6, 8}
 
@@ -41,10 +39,26 @@ class Finding:
 def lint_text(text: str) -> list[Finding]:
     findings: list[Finding] = []
     in_comment = False
+    pending: dict | None = None
     for lineno, line in enumerate(text.splitlines(), start=1):
         masked, in_comment = _mask_comments_and_strings(line, in_comment)
-        findings.extend(_check_hex(masked, lineno))
-        findings.extend(_check_functional(masked, lineno))
+
+        if pending is not None:
+            close = masked.find(")")
+            if close == -1:
+                pending["args"] += " " + masked
+                continue
+            pending["args"] += " " + masked[:close]
+            findings.extend(_check_functional_call(
+                pending["func"], pending["args"], pending["line"], pending["col"],
+            ))
+            segment, col_offset, pending = masked[close + 1:], close + 1, None
+        else:
+            segment, col_offset = masked, 0
+
+        segment_findings, pending = _scan_segment(segment, lineno, col_offset)
+        findings.extend(segment_findings)
+
     return findings
 
 
@@ -99,33 +113,53 @@ def _mask_comments_and_strings(line: str, in_comment: bool) -> tuple[str, bool]:
     return "".join(chars), in_comment
 
 
-def _check_hex(line: str, lineno: int) -> list[Finding]:
-    findings = []
-    for m in HEX_RE.finditer(line):
-        digits = m.group(1)
-        if len(digits) not in VALID_HEX_LENGTHS:
-            findings.append(Finding(
-                lineno, m.start() + 1, "hex-length",
-                f"#{digits} has {len(digits)} hex digits; valid lengths are 3, 4, 6, or 8",
-            ))
-    return findings
+def _scan_segment(text: str, lineno: int, col_offset: int) -> tuple[list[Finding], dict | None]:
+    # Walks hex codes and colour functions left to right, in the order they
+    # appear, rather than running two independent regex passes, because a
+    # function call that turns out to be unclosed swallows the rest of the
+    # segment (its args continue on the next line) and there's nothing left
+    # on this line worth scanning after it.
+    findings: list[Finding] = []
+    pos = 0
+    n = len(text)
+    while pos < n:
+        hex_m = HEX_RE.search(text, pos)
+        func_m = FUNC_START_RE.search(text, pos)
+        if func_m is None or (hex_m is not None and hex_m.start() < func_m.start()):
+            if hex_m is None:
+                break
+            digits = hex_m.group(1)
+            if len(digits) not in VALID_HEX_LENGTHS:
+                findings.append(Finding(
+                    lineno, col_offset + hex_m.start() + 1, "hex-length",
+                    f"#{digits} has {len(digits)} hex digits; valid lengths are 3, 4, 6, or 8",
+                ))
+            pos = hex_m.end()
+            continue
+
+        func = func_m.group(1).lower()
+        args_start = func_m.end()
+        close = text.find(")", args_start)
+        col = col_offset + func_m.start() + 1
+        if close == -1:
+            pending = {"func": func, "args": text[args_start:], "line": lineno, "col": col}
+            return findings, pending
+
+        findings.extend(_check_functional_call(func, text[args_start:close], lineno, col))
+        pos = close + 1
+
+    return findings, None
 
 
-def _check_functional(line: str, lineno: int) -> list[Finding]:
-    findings = []
-    for m in FUNC_RE.finditer(line):
-        func = m.group(1).lower()
-        args = m.group(2)
-        col = m.start() + 1
-        if func.startswith("rgb"):
-            findings.extend(_check_rgb(func, args, lineno, col))
-        elif func.startswith("hsl"):
-            findings.extend(_check_hsl(func, args, lineno, col))
-        elif func.endswith("lab"):
-            findings.extend(_check_lab(func, args, lineno, col))
-        else:
-            findings.extend(_check_lch(func, args, lineno, col))
-    return findings
+def _check_functional_call(func: str, args: str, lineno: int, col: int) -> list[Finding]:
+    if func.startswith("rgb"):
+        return _check_rgb(func, args, lineno, col)
+    elif func.startswith("hsl"):
+        return _check_hsl(func, args, lineno, col)
+    elif func.endswith("lab"):
+        return _check_lab(func, args, lineno, col)
+    else:
+        return _check_lch(func, args, lineno, col)
 
 
 def _classify(token: str) -> tuple[str | None, float | None]:

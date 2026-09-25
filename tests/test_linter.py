@@ -77,6 +77,16 @@ CASES = [
      "/* start\ncolor: #abcde;\nend */", []),
     ("content after a multi-line comment closes is still checked",
      "/* start\nend */ color: #abcde;", ["hex-length"]),
+    ("rgb() split across two lines is still checked",
+     "color: rgb(50%,\n  100, 20);", ["rgb-mixed-units"]),
+    ("hsl() split across two lines is still checked",
+     "color: hsl(120,\n  50, 50%);", ["hsl-percent-required"]),
+    ("a colour function split across three lines is still checked",
+     "color: rgb(\n  300,\n  0, 0);", ["rgb-range"]),
+    ("a second colour function later on the same line is still checked",
+     "background: rgb(255 0 0), color: rgb(300, 0, 0);", ["rgb-range"]),
+    ("an unterminated colour function at end of file is left alone",
+     "color: rgb(50%,\n  100, 20", []),
 ]
 
 
@@ -91,6 +101,12 @@ class LintTextTableTests(unittest.TestCase):
         text = "a {\n  color: rgb(300, 0, 0);\n}\n"
         findings = lint_text(text)
         self.assertEqual([f.line for f in findings], [2])
+
+    def test_multiline_function_reports_at_its_opening_line_and_column(self):
+        text = "a {\n  color: rgb(50%,\n    100, 20);\n}\n"
+        findings = lint_text(text)
+        self.assertEqual(len(findings), 1)
+        self.assertEqual((findings[0].line, findings[0].column), (2, 10))
 
 
 if __name__ == "__main__":
